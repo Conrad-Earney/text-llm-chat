@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
+from datetime import datetime
 
 from chat_logic import generate_reply
 from session_logger import SessionLogger
@@ -21,25 +22,17 @@ def main():
     # --- Initialize logger ---
     logger = SessionLogger()
 
-    # --- Top bar with New Chat + Close ---
-    top_bar = tk.Frame(container)
-    top_bar.pack(fill="x", pady=5)
-
-    def new_chat():
-        chat_box.configure(state="normal")
-        chat_box.delete("1.0", tk.END)
-        chat_box.configure(state="disabled")
-
-    new_chat_button = ttk.Button(top_bar, text="New Chat", command=new_chat)
-    new_chat_button.pack(side="left", padx=5)
-
-    close_button = ttk.Button(top_bar, text="Close", command=root.destroy)
-    close_button.pack(side="right", padx=5)
+    status_label = ttk.Label(container, text="Ready", foreground="green")
+    status_label.pack(pady=(0, 10))
 
     # --- Chat history display (scrollable) ---
     chat_box = ScrolledText(container, width=80, height=25,
                             wrap="word", state="disabled")
     chat_box.pack(pady=10, fill="both", expand=True)
+
+    def set_status(text, color):
+        status_label.config(text=text, foreground=color)
+        status_label.update_idletasks()
 
     def add_chat_message(role, text):
         chat_box.configure(state="normal")
@@ -57,25 +50,57 @@ def main():
     send_button = ttk.Button(input_frame, text="Send")
     send_button.pack(side="left", padx=10)
 
+    current_turn_started_at = None
+
+    def on_input_modified(event=None):
+        nonlocal current_turn_started_at
+        if current_turn_started_at is None:
+            current_turn_started_at = datetime.now()
+
     # --- Sending logic ---
     def on_send(event=None):
+        nonlocal current_turn_started_at
         user_text = input_box.get("1.0", tk.END).strip()
         if not user_text:
             return
 
+        user_sent_at = datetime.now()
+        turn_started_at = current_turn_started_at or user_sent_at
+
+        input_box.configure(state="disabled")
+        send_button.config(state="disabled")
+        set_status("Waiting for AI reply...", "blue")
+
         # Show user message
         add_chat_message("You", user_text)
+        input_box.configure(state="normal")
         input_box.delete("1.0", tk.END)
+        input_box.edit_modified(False)
+        input_box.configure(state="disabled")
 
         # AI reply
+        ai_started_at = datetime.now()
         reply = generate_reply(user_text)
+        ai_finished_at = datetime.now()
         add_chat_message("AI", reply)
 
         # Log turn
-        logger.log_turn(user_text, reply)
+        logger.log_turn(
+            user_text=user_text,
+            ai_text=reply,
+            turn_started_at=turn_started_at,
+            user_sent_at=user_sent_at,
+            ai_started_at=ai_started_at,
+            ai_finished_at=ai_finished_at,
+        )
 
-    # Enter key to send
-    root.bind("<Return>", on_send)
+        current_turn_started_at = None
+        input_box.configure(state="normal")
+        send_button.config(state="normal")
+        set_status("Ready", "green")
+
+    input_box.bind("<KeyPress>", on_input_modified)
+
     send_button.config(command=on_send)
 
     # --- Start UI loop ---
