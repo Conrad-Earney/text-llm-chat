@@ -1,4 +1,6 @@
 import tkinter as tk
+import os
+import re
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from datetime import datetime
@@ -7,13 +9,100 @@ from chat_logic import generate_reply
 from session_logger import SessionLogger
 
 
+WINDOWED_FALLBACK_GEOMETRY = "1280x800+80+80"
+
+
+def _signed_offset(value):
+    return "+{}".format(value) if value >= 0 else str(value)
+
+
+def _format_geometry(width, height, x, y):
+    return "{}x{}{}{}".format(width, height, _signed_offset(x), _signed_offset(y))
+
+
+def _parse_geometry_override(raw_value):
+    raw_value = (raw_value or "").strip()
+    if not raw_value:
+        return None
+
+    match = re.fullmatch(r"(\d+)x(\d+)([+-]\d+)([+-]\d+)", raw_value)
+    if not match:
+        return None
+
+    width_text, height_text, x_text, y_text = match.groups()
+    return (
+        max(200, int(width_text)),
+        max(200, int(height_text)),
+        int(x_text),
+        int(y_text),
+    )
+
+
+def _best_external_geometry(root):
+    root.update_idletasks()
+
+    screen_w = int(root.winfo_screenwidth())
+    screen_h = int(root.winfo_screenheight())
+    vroot_x = int(root.winfo_vrootx())
+    vroot_y = int(root.winfo_vrooty())
+    vroot_w = int(root.winfo_vrootwidth())
+    vroot_h = int(root.winfo_vrootheight())
+
+    virtual_left = vroot_x
+    virtual_top = vroot_y
+    virtual_right = vroot_x + vroot_w
+    virtual_bottom = vroot_y + vroot_h
+
+    candidates = []
+
+    if virtual_left < 0:
+        candidates.append((0 - virtual_left, screen_h, virtual_left, 0))
+    if virtual_right > screen_w:
+        candidates.append((virtual_right - screen_w, screen_h, screen_w, 0))
+    if virtual_top < 0:
+        candidates.append((screen_w, 0 - virtual_top, 0, virtual_top))
+    if virtual_bottom > screen_h:
+        candidates.append((screen_w, virtual_bottom - screen_h, 0, screen_h))
+
+    candidates = [candidate for candidate in candidates if candidate[0] >= 400 and candidate[1] >= 300]
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda candidate: candidate[0] * candidate[1])
+
+
+def _enter_presentation_display(root, bounds_override_env):
+    override = _parse_geometry_override(os.getenv(bounds_override_env))
+    if override is not None:
+        width, height, x, y = override
+    else:
+        target = _best_external_geometry(root)
+        if target is None:
+            root.geometry(WINDOWED_FALLBACK_GEOMETRY)
+            return False
+        width, height, x, y = target
+
+    root.attributes("-fullscreen", False)
+    root.overrideredirect(True)
+    root.geometry(_format_geometry(width, height, x, y))
+    root.lift()
+    return True
+
+
 def main():
     root = tk.Tk()
     root.title("Text Chat")
 
-    # --- Fullscreen & Escape to exit fullscreen ---
-    root.attributes("-fullscreen", True)
-    root.bind("<Escape>", lambda e: root.attributes("-fullscreen", False))
+    presentation_mode = _enter_presentation_display(root, "TEXT_LLM_CHAT_DISPLAY_BOUNDS")
+
+    def on_escape(event=None):
+        if presentation_mode:
+            root.overrideredirect(False)
+            root.geometry(WINDOWED_FALLBACK_GEOMETRY)
+        else:
+            root.attributes("-fullscreen", False)
+
+    root.bind("<Escape>", on_escape)
 
     # --- Center container frame ---
     container = tk.Frame(root)
