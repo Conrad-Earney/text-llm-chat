@@ -2,11 +2,13 @@ import os
 import json
 from datetime import datetime
 
+from config import SESSIONS_DIRNAME
+
 
 class SessionLogger:
     def __init__(self):
         # Ensure /sessions exists
-        base_dir = os.path.join(os.path.dirname(__file__), "sessions")
+        base_dir = os.path.join(os.path.dirname(__file__), SESSIONS_DIRNAME)
         os.makedirs(base_dir, exist_ok=True)
 
         # Create timestamped session folder
@@ -54,7 +56,9 @@ class SessionLogger:
                     if turn_id is None:
                         continue
 
-                    lines.append(self._dialogue_line(turn_id, "user", record.get("user_text", "")))
+                    event_type = str(record.get("event_type", "participant")).strip().lower()
+                    if event_type == "participant":
+                        lines.append(self._dialogue_line(turn_id, "user", record.get("user_text", "")))
                     lines.append(self._dialogue_line(turn_id, "assistant", record.get("assistant_text", "")))
 
         dialogue_text = "\n\n\n".join(lines)
@@ -75,9 +79,28 @@ class SessionLogger:
 
         record = {
             "turn": self.turn,
+            "event_type": "participant",
             "participant_duration_sec": participant_response_time_sec,
             "ai_duration_sec": ai_response_time_sec,
             "user_text": user_text,
+            "assistant_text": ai_text,
+        }
+
+        self._log(record)
+        self._rewrite_session_dialogue()
+        self.last_ai_timestamp = ai_finished_at
+
+    def log_watchdog_turn(self, ai_text, ai_started_at, ai_finished_at):
+        self.turn += 1
+
+        ai_response_time_sec = (ai_finished_at - ai_started_at).total_seconds()
+
+        record = {
+            "turn": self.turn,
+            "event_type": "watchdog",
+            "participant_duration_sec": None,
+            "ai_duration_sec": ai_response_time_sec,
+            "user_text": "",
             "assistant_text": ai_text,
         }
 
