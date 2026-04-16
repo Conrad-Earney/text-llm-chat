@@ -1,150 +1,284 @@
 import tkinter as tk
 import re
 import threading
-from tkinter import ttk
-from tkinter.scrolledtext import ScrolledText
 from datetime import datetime
 
 from chat_logic import generate_reply
-from config import (
-    APP_TITLE,
-    DISPLAY_BOUNDS_OVERRIDE,
-    WATCHDOG_ENABLED_AT_TURN,
-    WATCHDOG_IDLE_SEC,
-    WATCHDOG_MAX_REPLIES,
-    WINDOWED_FALLBACK_GEOMETRY,
-)
+import config as cfg
 from conversation import ConversationState
 from session_logger import SessionLogger
 
 
-def _signed_offset(value):
-    return "+{}".format(value) if value >= 0 else str(value)
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_BLOCKED_SHORTCUTS = (
+    "q",
+    "w",
+    "h",
+    "m",
+    "n",
+    "o",
+    "s",
+    "p",
+    "r",
+    "l",
+    "t",
+    "a",
+    "c",
+    "v",
+    "x",
+    "grave",
+    "comma",
+    "period",
+    "slash",
+)
 
 
-def _format_geometry(width, height, x, y):
-    return "{}x{}{}{}".format(width, height, _signed_offset(x), _signed_offset(y))
-
-
-def _parse_geometry_override(raw_value):
-    raw_value = (raw_value or "").strip()
-    if not raw_value:
-        return None
-
-    match = re.fullmatch(r"(\d+)x(\d+)([+-]\d+)([+-]\d+)", raw_value)
-    if not match:
-        return None
-
-    width_text, height_text, x_text, y_text = match.groups()
-    return (
-        max(200, int(width_text)),
-        max(200, int(height_text)),
-        int(x_text),
-        int(y_text),
-    )
-
-
-def _best_external_geometry(root):
-    root.update_idletasks()
-
-    screen_w = int(root.winfo_screenwidth())
-    screen_h = int(root.winfo_screenheight())
-    vroot_x = int(root.winfo_vrootx())
-    vroot_y = int(root.winfo_vrooty())
-    vroot_w = int(root.winfo_vrootwidth())
-    vroot_h = int(root.winfo_vrootheight())
-
-    virtual_left = vroot_x
-    virtual_top = vroot_y
-    virtual_right = vroot_x + vroot_w
-    virtual_bottom = vroot_y + vroot_h
-
-    candidates = []
-
-    if virtual_left < 0:
-        candidates.append((0 - virtual_left, screen_h, virtual_left, 0))
-    if virtual_right > screen_w:
-        candidates.append((virtual_right - screen_w, screen_h, screen_w, 0))
-    if virtual_top < 0:
-        candidates.append((screen_w, 0 - virtual_top, 0, virtual_top))
-    if virtual_bottom > screen_h:
-        candidates.append((screen_w, virtual_bottom - screen_h, 0, screen_h))
-
-    candidates = [candidate for candidate in candidates if candidate[0] >= 400 and candidate[1] >= 300]
-    if not candidates:
-        return None
-
-    return max(candidates, key=lambda candidate: candidate[0] * candidate[1])
-
-
-def _enter_presentation_display(root, bounds_override):
-    override = _parse_geometry_override(bounds_override)
-    if override is not None:
-        width, height, x, y = override
-    else:
-        target = _best_external_geometry(root)
-        if target is None:
-            root.geometry(WINDOWED_FALLBACK_GEOMETRY)
-            return False
-        width, height, x, y = target
-
-    root.attributes("-fullscreen", False)
-    root.overrideredirect(True)
-    root.geometry(_format_geometry(width, height, x, y))
+def _enter_fullscreen(root):
+    root.attributes("-fullscreen", True)
     root.lift()
-    return True
+
+
+def _sanitize_user_text(raw_text):
+    text = str(raw_text or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\u2028", "\n").replace("\u2029", "\n")
+    text = _CONTROL_CHARS_RE.sub("", text)
+
+    lines = []
+    blank_count = 0
+    for line in text.split("\n"):
+        line = line.strip()
+        if line:
+            blank_count = 0
+            lines.append(line)
+            continue
+        if blank_count < 1:
+            lines.append("")
+        blank_count += 1
+
+    text = "\n".join(lines).strip()
+    if len(text) > cfg.MAX_USER_INPUT_CHARS:
+        text = text[:cfg.MAX_USER_INPUT_CHARS].rstrip()
+    return text
+
+
+def _format_message_for_display(text):
+    lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = [line.strip() for line in lines]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _make_scrollable_text(parent, width, height, font, fg, pad_x=cfg.TEXT_BOX_PAD_X):
+    frame = tk.Frame(
+        parent,
+        bg=cfg.TEXT_BOX_BORDER_COLOR,
+        relief="solid",
+        borderwidth=1,
+        highlightthickness=0,
+    )
+    text = tk.Text(
+        frame,
+        width=width,
+        height=height,
+        wrap="word",
+        font=font,
+        bg=cfg.TEXT_BOX_BACKGROUND_COLOR,
+        fg=fg,
+        insertbackground=cfg.INPUT_TEXT_COLOR,
+        selectbackground="#C8D8F0",
+        selectforeground=fg,
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=0,
+        padx=pad_x,
+        pady=cfg.TEXT_BOX_PAD_Y,
+    )
+    scrollbar = tk.Scrollbar(
+        frame,
+        orient="vertical",
+        command=text.yview,
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=0,
+    )
+    text.configure(yscrollcommand=scrollbar.set)
+    text.grid(row=0, column=0, sticky="nsew")
+    scrollbar.grid(row=0, column=1, sticky="ns")
+    frame.grid_columnconfigure(0, weight=1)
+    frame.grid_rowconfigure(0, weight=1)
+    return frame, text
 
 
 def main():
     root = tk.Tk()
-    root.title(APP_TITLE)
+    root.title(cfg.APP_TITLE)
 
-    presentation_mode = _enter_presentation_display(root, DISPLAY_BOUNDS_OVERRIDE)
+    _enter_fullscreen(root)
+    chat_font = (cfg.FONT_FAMILY, cfg.CHAT_FONT_SIZE_PT)
+    input_font = (cfg.FONT_FAMILY, cfg.INPUT_FONT_SIZE_PT)
+    status_font = (cfg.FONT_FAMILY, cfg.STATUS_FONT_SIZE_PT)
+    button_font = (cfg.FONT_FAMILY, cfg.BUTTON_FONT_SIZE_PT)
 
-    def on_escape(event=None):
-        if presentation_mode:
-            root.overrideredirect(False)
-            root.geometry(WINDOWED_FALLBACK_GEOMETRY)
-        else:
-            root.attributes("-fullscreen", False)
+    def swallow_event(event=None):
+        return "break"
 
-    root.bind("<Escape>", on_escape)
+    def quit_app(event=None):
+        cancel_watchdog()
+        root.destroy()
+        return "break"
+
+    if root.tk.call("tk", "windowingsystem") == "aqua":
+        root.createcommand("tk::mac::Quit", swallow_event)
+        root.createcommand("tk::mac::ShowPreferences", swallow_event)
+
+    root.protocol("WM_DELETE_WINDOW", swallow_event)
+    root.bind_all("<Escape>", swallow_event)
+    for shortcut in cfg.EXPERIMENTER_QUIT_SHORTCUTS:
+        root.bind_all(shortcut, quit_app)
+    for key in _BLOCKED_SHORTCUTS:
+        root.bind_all("<Command-{}>".format(key), swallow_event)
+        if key != "q":
+            root.bind_all("<Control-{}>".format(key), swallow_event)
 
     # --- Center container frame ---
-    container = tk.Frame(root)
+    root.configure(bg=cfg.APP_BACKGROUND_COLOR)
+    container = tk.Frame(root, bg=cfg.APP_BACKGROUND_COLOR)
     container.place(relx=0.5, rely=0.5, anchor="center")
 
     # --- Initialize logger ---
     logger = SessionLogger()
     conversation = ConversationState()
 
-    status_label = ttk.Label(container, text="Ready", foreground="green")
-    status_label.pack(pady=(0, 10))
-
     # --- Chat history display (scrollable) ---
-    chat_box = ScrolledText(container, width=80, height=25,
-                            wrap="word", state="disabled")
-    chat_box.pack(pady=10, fill="both", expand=True)
+    chat_frame, chat_box = _make_scrollable_text(
+        container,
+        width=cfg.CHAT_WIDTH_CHARS,
+        height=cfg.CHAT_HEIGHT_LINES,
+        font=chat_font,
+        fg=cfg.ASSISTANT_TEXT_COLOR,
+    )
+    chat_box.configure(state="disabled")
+    chat_frame.grid(row=0, column=0, pady=(0, cfg.CHAT_STATUS_GAP_PX))
+    chat_box.tag_configure(
+        "assistant_message",
+        justify="left",
+        foreground=cfg.ASSISTANT_TEXT_COLOR,
+        rmargin=cfg.CHAT_TEXT_MARGIN_PX,
+        spacing1=2,
+        spacing3=0,
+    )
+    chat_box.tag_configure(
+        "user_message",
+        justify="left",
+        foreground=cfg.USER_TEXT_COLOR,
+        rmargin=cfg.USER_MESSAGE_RIGHT_MARGIN_PX,
+        spacing1=2,
+        spacing3=0,
+    )
+    chat_box.tag_configure(
+        "error_message",
+        justify="left",
+        foreground=cfg.ERROR_TEXT_COLOR,
+        rmargin=cfg.CHAT_TEXT_MARGIN_PX,
+        spacing1=2,
+        spacing3=0,
+    )
+    chat_box.tag_configure(
+        "message_gap",
+        spacing3=cfg.MESSAGE_SPACING_AFTER_PX,
+    )
 
-    def set_status(text, color):
-        status_label.config(text=text, foreground=color)
-        status_label.update_idletasks()
+    def update_chat_message_margins(event=None):
+        user_left_margin = max(
+            cfg.CHAT_TEXT_MARGIN_PX,
+            int(chat_box.winfo_width() * cfg.USER_MESSAGE_LEFT_MARGIN_FRACTION),
+        )
+        chat_box.tag_configure(
+            "user_message",
+            lmargin1=user_left_margin,
+            lmargin2=user_left_margin,
+        )
+
+    chat_box.bind("<Configure>", update_chat_message_margins)
+    root.after_idle(update_chat_message_margins)
 
     def add_chat_message(role, text):
+        tag = "user_message" if role == "You" else "assistant_message"
+        if str(text or "").startswith("ERROR:"):
+            tag = "error_message"
+        display_text = _format_message_for_display(text)
         chat_box.configure(state="normal")
-        chat_box.insert(tk.END, f"{role}: {text}\n\n")
+        chat_box.insert(tk.END, "{}\n".format(display_text), tag)
+        chat_box.insert(tk.END, "\n", "message_gap")
         chat_box.configure(state="disabled")
         chat_box.see(tk.END)
 
     # --- Input area ---
-    input_frame = tk.Frame(container)
-    input_frame.pack(fill="x", pady=10)
+    input_frame = tk.Frame(container, bg=cfg.APP_BACKGROUND_COLOR)
+    input_frame.grid(row=1, column=0, pady=(0, 10), sticky="ew")
 
-    input_box = ScrolledText(input_frame, height=4, width=60, wrap="word")
-    input_box.pack(side="left", fill="both", expand=True)
+    input_box_frame, input_box = _make_scrollable_text(
+        input_frame,
+        height=cfg.INPUT_HEIGHT_LINES,
+        width=cfg.INPUT_WIDTH_CHARS,
+        font=input_font,
+        fg=cfg.INPUT_TEXT_COLOR,
+        pad_x=cfg.INPUT_TEXT_BOX_PAD_X,
+    )
+    input_box_frame.grid(row=0, column=0, sticky="ew")
+    if cfg.PREFILL_USER_INPUT_ENABLED:
+        input_box.insert("1.0", cfg.PREFILL_USER_INPUT_TEXT)
 
-    send_button = ttk.Button(input_frame, text="Send")
-    send_button.pack(side="left", padx=10)
+    control_frame = tk.Frame(input_frame, bg=cfg.APP_BACKGROUND_COLOR)
+    control_frame.grid(row=0, column=1, padx=(10, 0), sticky="ns")
+
+    send_button = tk.Button(
+        control_frame,
+        text="Send",
+        font=button_font,
+        width=cfg.BUTTON_WIDTH_CHARS,
+        padx=cfg.BUTTON_PAD_X,
+        pady=cfg.BUTTON_PAD_Y,
+        relief="raised",
+        borderwidth=1,
+        bg=cfg.BUTTON_BACKGROUND_COLOR,
+        fg=cfg.BUTTON_TEXT_COLOR,
+        activebackground=cfg.BUTTON_ACTIVE_BACKGROUND_COLOR,
+        activeforeground=cfg.BUTTON_TEXT_COLOR,
+        disabledforeground="#777777",
+        highlightthickness=0,
+        highlightbackground=cfg.APP_BACKGROUND_COLOR,
+    )
+    send_button.configure(
+        background=cfg.BUTTON_BACKGROUND_COLOR,
+        foreground=cfg.BUTTON_TEXT_COLOR,
+    )
+    send_button.grid(row=0, column=0, pady=(0, cfg.BUTTON_STATUS_GAP_PX // 2), sticky="nsew")
+
+    status_label = tk.Label(
+        control_frame,
+        text="Ready",
+        fg=cfg.READY_STATUS_COLOR,
+        bg=cfg.STATUS_BACKGROUND_COLOR,
+        font=status_font,
+        width=cfg.STATUS_WIDTH_CHARS,
+        anchor="center",
+        relief="solid",
+        borderwidth=1,
+        highlightthickness=0,
+        highlightbackground=cfg.STATUS_BORDER_COLOR,
+    )
+    status_label.grid(row=1, column=0, pady=(cfg.BUTTON_STATUS_GAP_PX // 2, 0), sticky="nsew")
+
+    def set_status(text, color):
+        status_label.config(text=text, fg=color)
+        status_label.update_idletasks()
+
+    input_frame.grid_columnconfigure(0, weight=1)
+    control_frame.grid_columnconfigure(0, weight=1)
+    control_frame.grid_rowconfigure(0, weight=1, uniform="control_stack")
+    control_frame.grid_rowconfigure(1, weight=1, uniform="control_stack")
+    container.grid_columnconfigure(0, weight=1)
 
     current_turn_started_at = None
     reply_in_progress = False
@@ -157,6 +291,19 @@ def main():
         if current_turn_started_at is None:
             current_turn_started_at = datetime.now()
         cancel_watchdog()
+
+    def enforce_input_limit(event=None):
+        text = input_box.get("1.0", "end-1c")
+        if len(text) <= cfg.MAX_USER_INPUT_CHARS:
+            return
+        input_box.delete("1.0 + {} chars".format(cfg.MAX_USER_INPUT_CHARS), tk.END)
+        input_box.bell()
+
+    def on_input_key_release(event=None):
+        enforce_input_limit()
+        if input_box.get("1.0", tk.END).strip():
+            return
+        schedule_watchdog()
 
     def set_interaction_enabled(enabled):
         input_state = "normal" if enabled else "disabled"
@@ -173,15 +320,17 @@ def main():
     def schedule_watchdog():
         nonlocal watchdog_after_id
         cancel_watchdog()
-        if WATCHDOG_IDLE_SEC <= 0:
+        if reply_in_progress or watchdog_in_progress:
             return
-        if conversation.turn_count < WATCHDOG_ENABLED_AT_TURN:
+        if cfg.WATCHDOG_IDLE_SEC <= 0:
             return
-        if WATCHDOG_MAX_REPLIES >= 0 and watchdog_reply_count_for_turn >= WATCHDOG_MAX_REPLIES:
+        if conversation.turn_count < cfg.WATCHDOG_ENABLED_AT_TURN:
+            return
+        if cfg.WATCHDOG_MAX_REPLIES >= 0 and watchdog_reply_count_for_turn >= cfg.WATCHDOG_MAX_REPLIES:
             return
         if not conversation.has_assistant_history():
             return
-        watchdog_after_id = root.after(int(WATCHDOG_IDLE_SEC * 1000), on_watchdog_timeout)
+        watchdog_after_id = root.after(int(cfg.WATCHDOG_IDLE_SEC * 1000), on_watchdog_timeout)
 
     def complete_turn(user_text, turn_started_at, user_sent_at, ai_started_at, reply, ai_finished_at):
         nonlocal current_turn_started_at, reply_in_progress
@@ -200,7 +349,7 @@ def main():
         current_turn_started_at = None
         reply_in_progress = False
         set_interaction_enabled(True)
-        set_status("Ready", "green")
+        set_status("Ready", cfg.READY_STATUS_COLOR)
         schedule_watchdog()
 
     def complete_watchdog_turn(reply, ai_started_at, ai_finished_at):
@@ -214,7 +363,7 @@ def main():
         )
         watchdog_in_progress = False
         watchdog_reply_count_for_turn += 1
-        set_status("Ready", "green")
+        set_status("Ready", cfg.READY_STATUS_COLOR)
         schedule_watchdog()
 
     def generate_reply_async(user_text, turn_started_at, user_sent_at, messages):
@@ -255,7 +404,7 @@ def main():
             return
 
         watchdog_in_progress = True
-        set_status("Waiting for AI reply...", "blue")
+        set_status("Thinking...", cfg.THINKING_STATUS_COLOR)
         messages = conversation.build_watchdog_messages()
         threading.Thread(
             target=generate_watchdog_reply_async,
@@ -269,8 +418,9 @@ def main():
         if reply_in_progress:
             return
 
-        user_text = input_box.get("1.0", tk.END).strip()
+        user_text = _sanitize_user_text(input_box.get("1.0", tk.END))
         if not user_text:
+            input_box.delete("1.0", tk.END)
             return
 
         user_sent_at = datetime.now()
@@ -286,7 +436,7 @@ def main():
         input_box.edit_modified(False)
 
         set_interaction_enabled(False)
-        set_status("Waiting for AI reply...", "blue")
+        set_status("Thinking...", cfg.THINKING_STATUS_COLOR)
 
         threading.Thread(
             target=generate_reply_async,
@@ -295,6 +445,18 @@ def main():
         ).start()
 
     input_box.bind("<KeyPress>", on_input_modified)
+    input_box.bind("<KeyRelease>", on_input_key_release)
+    for shortcut in ("<Command-a>", "<Command-A>", "<Control-a>", "<Control-A>"):
+        input_box.bind(shortcut, swallow_event)
+    for shortcut in ("<Command-c>", "<Command-C>", "<Control-c>", "<Control-C>"):
+        input_box.bind(shortcut, swallow_event)
+    for shortcut in ("<Command-v>", "<Command-V>", "<Control-v>", "<Control-V>"):
+        input_box.bind(shortcut, swallow_event)
+    for shortcut in ("<Command-x>", "<Command-X>", "<Control-x>", "<Control-X>"):
+        input_box.bind(shortcut, swallow_event)
+    input_box.bind("<<Paste>>", swallow_event)
+    input_box.bind("<<Cut>>", swallow_event)
+    input_box.bind("<<Copy>>", swallow_event)
 
     send_button.config(command=on_send)
 

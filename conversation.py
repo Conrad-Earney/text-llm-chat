@@ -1,4 +1,9 @@
-from config import SYSTEM_PROMPT, TURN_INJECTIONS, WATCHDOG_SYSTEM_PROMPT, WATCHDOG_USER_PROMPT
+from config import (
+    SYSTEM_PROMPT,
+    TURN_INJECTIONS,
+    WATCHDOG_SYSTEM_PROMPT,
+    WATCHDOG_USER_PROMPT,
+)
 
 
 class ConversationState:
@@ -56,12 +61,13 @@ class ConversationState:
                 texts.append(text)
         return texts
 
-    def _base_messages(self):
+    def _base_messages(self, include_turn_injections=True):
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
-        for text in self._active_injection_texts():
-            messages.append({"role": "system", "content": text})
+        if include_turn_injections:
+            for text in self._active_injection_texts():
+                messages.append({"role": "system", "content": text})
         messages.extend(self.history)
         return messages
 
@@ -69,9 +75,12 @@ class ConversationState:
         return list(self._base_messages())
 
     def build_watchdog_messages(self):
-        messages = self._base_messages()
+        messages = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
         if self.watchdog_system_prompt:
             messages.append({"role": "system", "content": self.watchdog_system_prompt})
+        messages.extend(self.history)
         if self.watchdog_user_prompt:
             messages.append({"role": "user", "content": self.watchdog_user_prompt})
         return messages

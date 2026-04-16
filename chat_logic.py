@@ -1,11 +1,28 @@
 import requests
+import time
 
-from config import OLLAMA_MODEL, OLLAMA_URL, REQUEST_TIMEOUT_SEC
+from config import (
+    DUMMY_AI_REPLY,
+    DUMMY_AI_REPLY_DELAY_SEC,
+    DUMMY_AI_REPLY_ENABLED,
+    OLLAMA_MODEL,
+    OLLAMA_URL,
+    REQUEST_TIMEOUT_SEC,
+)
+
+
+def _participant_error(reason):
+    return "ERROR: {}. Please let the experimenter know.".format(reason)
 
 
 def generate_reply(messages):
+    if DUMMY_AI_REPLY_ENABLED:
+        if DUMMY_AI_REPLY_DELAY_SEC > 0:
+            time.sleep(DUMMY_AI_REPLY_DELAY_SEC)
+        return DUMMY_AI_REPLY
+
     if not messages:
-        return "I'm sorry, but I couldn't generate a reply just now. Please let the experimenter know."
+        return _participant_error("No model request was created")
 
     try:
         response = requests.post(
@@ -16,15 +33,15 @@ def generate_reply(messages):
         response.raise_for_status()
         payload = response.json()
     except requests.Timeout:
-        return "I'm sorry, but I took too long to reply. Please let the experimenter know."
+        return _participant_error("The model request timed out")
     except requests.RequestException:
-        return "I'm sorry, but I couldn't generate a reply just now. Please let the experimenter know."
+        return _participant_error("The model request failed")
     except ValueError:
-        return "I'm sorry, but I returned an unreadable response. Please let the experimenter know."
+        return _participant_error("The model returned an unreadable response")
 
     message = payload.get("message", {})
     reply = message.get("content", "")
     if not isinstance(reply, str) or not reply.strip():
-        return "I'm sorry, but I couldn't generate a usable reply just now. Please let the experimenter know."
+        return _participant_error("The model returned an empty response")
 
     return reply
