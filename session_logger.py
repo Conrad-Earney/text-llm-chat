@@ -1,22 +1,25 @@
 import os
 import json
+import shutil
 from datetime import datetime
 
-from config import SESSIONS_DIRNAME
+from config import SESSION_ARCHIVE_DIR, SESSIONS_DIRNAME
 
 
 class SessionLogger:
     def __init__(self):
-        # Ensure /sessions exists
         base_dir = os.path.join(os.path.dirname(__file__), SESSIONS_DIRNAME)
         os.makedirs(base_dir, exist_ok=True)
 
-        # Create timestamped session folder
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.session_dir = os.path.join(base_dir, f"session_{ts}")
+        session_name = f"session_{ts}"
+        self.session_dir = os.path.join(base_dir, session_name)
         os.makedirs(self.session_dir, exist_ok=True)
 
-        # Paths for session outputs
+        archive_base_dir = os.path.abspath(os.path.expanduser(SESSION_ARCHIVE_DIR))
+        self.archive_session_dir = os.path.join(archive_base_dir, session_name)
+        os.makedirs(self.archive_session_dir, exist_ok=True)
+
         self.log_path = os.path.join(self.session_dir, "conversation_log.jsonl")
         self.dialogue_path = os.path.join(self.session_dir, "session_dialogue.txt")
 
@@ -24,10 +27,18 @@ class SessionLogger:
         self.session_started_at = datetime.now()
         self.last_ai_timestamp = None
 
+    def _copy_session_to_archive(self):
+        for filename in os.listdir(self.session_dir):
+            src_path = os.path.join(self.session_dir, filename)
+            if os.path.isfile(src_path):
+                dst_path = os.path.join(self.archive_session_dir, filename)
+                shutil.copy2(src_path, dst_path)
+
     def _log(self, record):
         with open(self.log_path, "a", encoding="utf-8") as f:
             json.dump(record, f, ensure_ascii=False)
             f.write("\n")
+        self._copy_session_to_archive()
 
     def _atomic_write_text(self, final_path, text):
         tmp_path = final_path + ".tmp"
@@ -65,6 +76,7 @@ class SessionLogger:
         if dialogue_text:
             dialogue_text += "\n\n\n"
         self._atomic_write_text(self.dialogue_path, dialogue_text)
+        self._copy_session_to_archive()
 
     def log_turn(self, user_text, ai_text, turn_started_at, user_sent_at, ai_started_at, ai_finished_at):
         self.turn += 1

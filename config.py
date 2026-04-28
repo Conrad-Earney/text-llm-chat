@@ -80,3 +80,4 @@ WATCHDOG_USER_PROMPT = (
 )
 
 SESSIONS_DIRNAME = "sessions"
+SESSION_ARCHIVE_DIR = "~/Documents/Zoe"
