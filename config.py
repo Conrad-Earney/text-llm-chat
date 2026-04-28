@@ -1,3 +1,6 @@
+import os
+
+
 APP_TITLE = "Text Chat"
 EXPERIMENTER_QUIT_SHORTCUTS = ("<Control-Shift-Q>", "<Control-Shift-q>")
 MAX_USER_INPUT_CHARS = 4000
@@ -49,16 +52,26 @@ PREFILL_USER_INPUT_ENABLED = False
 PREFILL_USER_INPUT_TEXT = DUMMY_AI_REPLY
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "llama3.1:8b"
+OLLAMA_MODEL = "gesturizer5"
 REQUEST_TIMEOUT_SEC = 60
-SYSTEM_PROMPT = ""
+SYSTEM_PROMPT_PATH = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "uq-neuro-nao",
+        "config",
+        "prompts",
+        "zork_system_prompt.txt",
+    )
+)
+with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
+    SYSTEM_PROMPT = f.read().strip()
 
 TURN_INJECTIONS = [
     {
         "at_turn": 1,
         "text": (
-            "In your next reply, briefly introduce yourself and ask the participant "
-            "for their name."
+            "Introduce yourself, ask the participant their name, and ask them about their hobbies or interests."
         ),
     },
 ]

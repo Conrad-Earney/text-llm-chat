@@ -53,11 +53,11 @@ Main settings are grouped by purpose:
 - Colors: `APP_BACKGROUND_COLOR`, `TEXT_BOX_BACKGROUND_COLOR`, `TEXT_BOX_BORDER_COLOR`, `ASSISTANT_TEXT_COLOR`, `USER_TEXT_COLOR`, `ERROR_TEXT_COLOR`, `INPUT_TEXT_COLOR`, `READY_STATUS_COLOR`, `THINKING_STATUS_COLOR`, `STATUS_BACKGROUND_COLOR`, `STATUS_BORDER_COLOR`, `BUTTON_BACKGROUND_COLOR`, `BUTTON_ACTIVE_BACKGROUND_COLOR`, `BUTTON_TEXT_COLOR`
 - Padding/sizing: `TEXT_BOX_PAD_X`, `INPUT_TEXT_BOX_PAD_X`, `TEXT_BOX_PAD_Y`, `STATUS_WIDTH_CHARS`, `BUTTON_PAD_X`, `BUTTON_PAD_Y`, `BUTTON_WIDTH_CHARS`
 - Fonts: `FONT_FAMILY`, `CHAT_FONT_SIZE_PT`, `INPUT_FONT_SIZE_PT`, `STATUS_FONT_SIZE_PT`, `BUTTON_FONT_SIZE_PT`
-- Model: `OLLAMA_URL`, `OLLAMA_MODEL`, `REQUEST_TIMEOUT_SEC`, `SYSTEM_PROMPT`, `TURN_INJECTIONS`
+- Model: `OLLAMA_URL`, `OLLAMA_MODEL`, `REQUEST_TIMEOUT_SEC`, `SYSTEM_PROMPT_PATH`, `SYSTEM_PROMPT`, `TURN_INJECTIONS`
 - Watchdog: `WATCHDOG_IDLE_SEC`, `WATCHDOG_MAX_REPLIES`, `WATCHDOG_ENABLED_AT_TURN`, `WATCHDOG_SYSTEM_PROMPT`, `WATCHDOG_USER_PROMPT`
 - Local UI testing: `DUMMY_AI_REPLY_ENABLED`, `DUMMY_AI_REPLY_DELAY_SEC`, `DUMMY_AI_REPLY`, `PREFILL_USER_INPUT_ENABLED`, `PREFILL_USER_INPUT_TEXT`
 
-Turn injections are configured directly in `config.py` as a Python list so they stay easy to inspect and edit.
+`SYSTEM_PROMPT_PATH` points to the shared prompt document used by the UQ project profiles. `SYSTEM_PROMPT` is loaded from that file when the app starts. Turn injections are configured directly in `config.py` as a Python list so they stay easy to inspect and edit.
 
 For layout testing without Ollama, set `DUMMY_AI_REPLY_ENABLED = True`. To prefill the participant input box with test text, set `PREFILL_USER_INPUT_ENABLED = True`. Turn both off before running a real session.
 
