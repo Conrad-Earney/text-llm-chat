@@ -1,4 +1,5 @@
 from config import (
+    INITIAL_ASSISTANT_PROMPT,
     SYSTEM_PROMPT,
     TURN_INJECTIONS,
     WATCHDOG_SYSTEM_PROMPT,
@@ -10,11 +11,13 @@ class ConversationState:
     def __init__(
         self,
         system_prompt=SYSTEM_PROMPT,
+        initial_assistant_prompt=INITIAL_ASSISTANT_PROMPT,
         turn_injections=None,
         watchdog_system_prompt=WATCHDOG_SYSTEM_PROMPT,
         watchdog_user_prompt=WATCHDOG_USER_PROMPT,
     ):
         self.system_prompt = str(system_prompt or "").strip()
+        self.initial_assistant_prompt = str(initial_assistant_prompt or "").strip()
         self.turn_injections = list(turn_injections or TURN_INJECTIONS)
         self.watchdog_system_prompt = str(watchdog_system_prompt or "").strip()
         self.watchdog_user_prompt = str(watchdog_user_prompt or "").strip()
@@ -73,6 +76,15 @@ class ConversationState:
 
     def build_turn_messages(self):
         return list(self._base_messages())
+
+    def build_initial_assistant_messages(self):
+        messages = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        if self.initial_assistant_prompt:
+            messages.append({"role": "system", "content": self.initial_assistant_prompt})
+        messages.append({"role": "user", "content": "Please begin the conversation now."})
+        return messages
 
     def build_watchdog_messages(self):
         messages = []

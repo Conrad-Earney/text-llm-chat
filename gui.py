@@ -366,6 +366,22 @@ def main():
         set_status("Ready", cfg.READY_STATUS_COLOR)
         schedule_watchdog()
 
+    def complete_initial_turn(reply, ai_started_at, ai_finished_at):
+        nonlocal reply_in_progress, current_turn_started_at
+        add_chat_message("AI", reply)
+        if not str(reply or "").startswith("ERROR:"):
+            conversation.add_assistant_message(reply)
+        logger.log_initial_turn(
+            ai_text=reply,
+            ai_started_at=ai_started_at,
+            ai_finished_at=ai_finished_at,
+        )
+        current_turn_started_at = None
+        reply_in_progress = False
+        set_interaction_enabled(True)
+        set_status("Ready", cfg.READY_STATUS_COLOR)
+        input_box.focus_set()
+
     def generate_reply_async(user_text, turn_started_at, user_sent_at, messages):
         ai_started_at = datetime.now()
         reply = generate_reply(messages)
@@ -378,6 +394,18 @@ def main():
             user_sent_at,
             ai_started_at,
             reply,
+            ai_finished_at,
+        )
+
+    def generate_initial_reply_async(messages):
+        ai_started_at = datetime.now()
+        reply = generate_reply(messages)
+        ai_finished_at = datetime.now()
+        root.after(
+            0,
+            complete_initial_turn,
+            reply,
+            ai_started_at,
             ai_finished_at,
         )
 
@@ -444,8 +472,26 @@ def main():
             daemon=True,
         ).start()
 
+    def start_initial_turn():
+        nonlocal reply_in_progress
+        reply_in_progress = True
+        set_interaction_enabled(False)
+        set_status("Thinking...", cfg.THINKING_STATUS_COLOR)
+        messages = conversation.build_initial_assistant_messages()
+        threading.Thread(
+            target=generate_initial_reply_async,
+            args=(messages,),
+            daemon=True,
+        ).start()
+
+    def on_enter_send(event=None):
+        on_send(event)
+        return "break"
+
     input_box.bind("<KeyPress>", on_input_modified)
     input_box.bind("<KeyRelease>", on_input_key_release)
+    input_box.bind("<Return>", on_enter_send)
+    input_box.bind("<KP_Enter>", on_enter_send)
     for shortcut in ("<Command-a>", "<Command-A>", "<Control-a>", "<Control-A>"):
         input_box.bind(shortcut, swallow_event)
     for shortcut in ("<Command-c>", "<Command-C>", "<Control-c>", "<Control-C>"):
@@ -459,6 +505,7 @@ def main():
     input_box.bind("<<Copy>>", swallow_event)
 
     send_button.config(command=on_send)
+    root.after(0, start_initial_turn)
 
     # --- Start UI loop ---
     root.mainloop()

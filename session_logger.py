@@ -102,6 +102,22 @@ class SessionLogger:
         self._rewrite_session_dialogue()
         self.last_ai_timestamp = ai_finished_at
 
+    def log_initial_turn(self, ai_text, ai_started_at, ai_finished_at):
+        ai_response_time_sec = (ai_finished_at - ai_started_at).total_seconds()
+
+        record = {
+            "turn": 0,
+            "event_type": "initial",
+            "participant_duration_sec": None,
+            "ai_duration_sec": ai_response_time_sec,
+            "user_text": "",
+            "assistant_text": ai_text,
+        }
+
+        self._log(record)
+        self._rewrite_session_dialogue()
+        self.last_ai_timestamp = ai_finished_at
+
     def log_watchdog_turn(self, ai_text, ai_started_at, ai_finished_at):
         self.turn += 1
 

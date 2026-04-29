@@ -52,7 +52,7 @@ PREFILL_USER_INPUT_ENABLED = False
 PREFILL_USER_INPUT_TEXT = DUMMY_AI_REPLY
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "gesturizer5"
+OLLAMA_MODEL = "zork"
 REQUEST_TIMEOUT_SEC = 60
 SYSTEM_PROMPT_PATH = os.path.abspath(
     os.path.join(
@@ -61,22 +61,27 @@ SYSTEM_PROMPT_PATH = os.path.abspath(
         "uq-neuro-nao",
         "config",
         "prompts",
-        "zork_system_prompt.txt",
+        "zork_no_gestures.txt",
     )
 )
 with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
     SYSTEM_PROMPT = f.read().strip()
 
+INITIAL_ASSISTANT_PROMPT = (
+    "Begin the conversation with one brief, warm message. Introduce yourself "
+    "and ask the participant for their name. Return only the message itself."
+)
+
 TURN_INJECTIONS = [
     {
         "at_turn": 1,
         "text": (
-            "Introduce yourself, ask the participant their name, and ask them about their hobbies or interests."
-        ),
-    },
+            "Ask the participant about their hobbies or interests."
+        )
+    }
 ]
 
-WATCHDOG_IDLE_SEC = 15
+WATCHDOG_IDLE_SEC = 30 
 WATCHDOG_MAX_REPLIES = 999
 WATCHDOG_ENABLED_AT_TURN = 1
 WATCHDOG_SYSTEM_PROMPT = (
